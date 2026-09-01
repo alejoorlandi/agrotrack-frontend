@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f0fdf4;
+  --color-brand-100: #dcfce7;
+  --color-brand-500: #22c55e;
+  --color-brand-600: #16a34a;
+  --color-brand-700: #15803d;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+  margin: 0;
+  padding: 0;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.82)), 
+                    url('https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=2000');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  min-height: 100vh;
+}
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-white/90 backdrop-blur-xl border border-white/50 shadow-sm rounded-2xl transition-all duration-300;
+  }
+  
+  .glass-card:hover {
+    @apply shadow-md border-emerald-200/60 -translate-y-0.5;
+  }
+  
+  .table-row-hover {
+    @apply transition-all duration-300 hover:bg-emerald-50/50 hover:-translate-y-[1px] hover:shadow-[0_2px_10px_-4px_rgba(16,185,129,0.2)];
+  }
+}
+
