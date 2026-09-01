@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { FiRefreshCw, FiX, FiActivity, FiLayers, FiShield, FiAlertTriangle, FiPlusCircle, FiTrendingUp } from 'react-icons/fi';
+import { FiRefreshCw, FiX, FiActivity, FiLayers, FiShield, FiAlertTriangle, FiPlusCircle, FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
 import { HeartPulse, Scale, Tag, Calendar, ShieldAlert } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts';
 import api from '../services/api';
 
 const CowIcon = ({ className }) => (
@@ -23,10 +24,10 @@ export default function MonitoreoAnimales() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   
-  // Timeline states
-  const [timelineRecords, setTimelineRecords] = useState([]);
-  const [loadingTimeline, setLoadingTimeline] = useState(false);
-  const [errorTimeline, setErrorTimeline] = useState(null);
+  // Traceability states (replaces old timeline states)
+  const [traceabilityData, setTraceabilityData] = useState(null);
+  const [loadingTraceability, setLoadingTraceability] = useState(false);
+  const [errorTraceability, setErrorTraceability] = useState(null);
   const [changingStatus, setChangingStatus] = useState(false);
 
   const pollingRef = useRef(null);
@@ -76,26 +77,26 @@ export default function MonitoreoAnimales() {
     };
   }, [autoRefresh]);
 
-  // Load sanitary records timeline whenever the selected animal changes
+  // Load traceability data whenever the selected animal changes
   useEffect(() => {
     if (selectedAnimal?.id) {
-      const fetchTimeline = async () => {
-        setLoadingTimeline(true);
-        setErrorTimeline(null);
+      const fetchTraceability = async () => {
+        setLoadingTraceability(true);
+        setErrorTraceability(null);
         try {
-          const response = await api.get(`/sanitary-records?animal_id=${selectedAnimal.id}`);
-          setTimelineRecords(response.data.data || []);
+          const response = await api.get(`/animals/${selectedAnimal.id}/traceability`);
+          setTraceabilityData(response.data.data || null);
         } catch (err) {
-          console.error('Error fetching sanitary records for timeline:', err);
-          setErrorTimeline('No se pudieron cargar los registros sanitarios.');
+          console.error('Error fetching traceability:', err);
+          setErrorTraceability('No se pudieron cargar los datos de trazabilidad.');
         } finally {
-          setLoadingTimeline(false);
+          setLoadingTraceability(false);
         }
       };
 
-      fetchTimeline();
+      fetchTraceability();
     } else {
-      setTimelineRecords([]);
+      setTraceabilityData(null);
     }
   }, [selectedAnimal?.id]);
 
@@ -154,6 +155,86 @@ export default function MonitoreoAnimales() {
     if (s === 'quarantine') return 'Cuarentena';
     if (s === 'in_treatment') return 'En Tratamiento';
     return 'Sano (Corral General)';
+  };
+
+  // --- Helpers for traceability panel ---
+
+  // Prepare chart data from weightHistory
+  const getChartData = () => {
+    if (!traceabilityData?.weightHistory?.length) return [];
+    return traceabilityData.weightHistory.map(w => ({
+      date: new Date(w.recorded_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' }),
+      fullDate: new Date(w.recorded_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }),
+      weight: w.weight,
+    }));
+  };
+
+  // Detect weight loss anomaly (last record < previous)
+  const getWeightAnomaly = () => {
+    if (!traceabilityData?.weightHistory?.length || traceabilityData.weightHistory.length < 2) return null;
+    const history = traceabilityData.weightHistory;
+    const last = history[history.length - 1];
+    const prev = history[history.length - 2];
+    if (last.weight < prev.weight) {
+      return {
+        lost: (prev.weight - last.weight).toFixed(1),
+        from: prev.weight,
+        to: last.weight,
+      };
+    }
+    return null;
+  };
+
+  // Build unified timeline combining weight records + sanitary records
+  const getUnifiedTimeline = () => {
+    if (!traceabilityData) return [];
+
+    const items = [];
+
+    // Add weight records
+    (traceabilityData.weightHistory || []).forEach((w, idx, arr) => {
+      const prevWeight = idx > 0 ? arr[idx - 1].weight : null;
+      const diff = prevWeight !== null ? w.weight - prevWeight : null;
+      items.push({
+        type: 'weight',
+        date: new Date(w.recorded_at),
+        weight: w.weight,
+        diff,
+        isFirst: idx === 0,
+      });
+    });
+
+    // Add sanitary records
+    (traceabilityData.sanitaryRecords || []).forEach(r => {
+      items.push({
+        type: 'sanitary',
+        date: new Date(r.application_date + 'T00:00:00'),
+        medicine: r.medicine?.name || 'Fármaco Registrado',
+        medicineDesc: r.medicine?.description || '',
+        dose: r.dose,
+        releaseDate: r.release_date,
+        withdrawalDays: r.medicine?.withdrawal_days || 0,
+      });
+    });
+
+    // Sort chronologically (oldest first)
+    items.sort((a, b) => a.date - b.date);
+    return items;
+  };
+
+  // Custom tooltip for the chart
+  const ChartTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl px-3.5 py-2.5 shadow-lg">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{payload[0].payload.fullDate}</p>
+          <p className="text-sm font-black text-gray-800 mt-0.5">
+            {payload[0].value} <span className="text-xs font-bold text-gray-400">kg</span>
+          </p>
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -562,7 +643,70 @@ export default function MonitoreoAnimales() {
                   </div>
                 </div>
 
-                {/* TRACEABILITY TIMELINE */}
+                {/* WEIGHT EVOLUTION CHART */}
+                {loadingTraceability ? (
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+                    <div className="h-[180px] bg-gray-100 rounded-2xl"></div>
+                  </div>
+                ) : traceabilityData && getChartData().length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+                      <FiTrendingUp className="h-4 w-4 text-emerald-600" />
+                      <h4 className="text-xs font-black text-gray-700 tracking-wide uppercase">
+                        Evolución de Peso
+                      </h4>
+                    </div>
+
+                    {/* Anomaly Alert */}
+                    {getWeightAnomaly() && (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl bg-gradient-to-r from-rose-50 to-amber-50 border border-rose-200/60">
+                        <div className="p-1.5 bg-rose-100 rounded-lg flex-shrink-0 mt-0.5">
+                          <FiAlertTriangle className="h-4 w-4 text-rose-600" />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-black text-rose-700 uppercase tracking-wide">
+                            Anomalía detectada
+                          </p>
+                          <p className="text-[11px] text-rose-600/80 mt-0.5 font-medium leading-relaxed">
+                            Pérdida de peso registrada ({getWeightAnomaly().lost} kg). Posible problema sanitario.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bg-gray-50/50 border border-gray-100 rounded-2xl p-4">
+                      <ResponsiveContainer width="100%" height={180}>
+                        <LineChart data={getChartData()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 10, fill: '#9ca3af', fontWeight: 600 }} 
+                            axisLine={{ stroke: '#e5e7eb' }}
+                            tickLine={false}
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 10, fill: '#9ca3af', fontWeight: 600 }} 
+                            axisLine={{ stroke: '#e5e7eb' }}
+                            tickLine={false}
+                            unit=" kg"
+                          />
+                          <Tooltip content={<ChartTooltip />} />
+                          <Line 
+                            type="monotone" 
+                            dataKey="weight" 
+                            stroke="#10b981" 
+                            strokeWidth={2.5}
+                            dot={{ r: 4, fill: '#10b981', stroke: '#fff', strokeWidth: 2 }}
+                            activeDot={{ r: 6, fill: '#059669', stroke: '#fff', strokeWidth: 2 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
+                {/* UNIFIED TRACEABILITY TIMELINE */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
                     <Calendar className="h-4 w-4 text-emerald-600" />
@@ -571,7 +715,7 @@ export default function MonitoreoAnimales() {
                     </h4>
                   </div>
 
-                  {loadingTimeline ? (
+                  {loadingTraceability ? (
                     // Timeline Loader
                     <div className="space-y-4 py-4">
                       {[1, 2].map((n) => (
@@ -585,55 +729,108 @@ export default function MonitoreoAnimales() {
                         </div>
                       ))}
                     </div>
-                  ) : errorTimeline ? (
+                  ) : errorTraceability ? (
                     <div className="p-3 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl text-xs font-semibold">
-                      {errorTimeline}
+                      {errorTraceability}
                     </div>
-                  ) : timelineRecords.length === 0 ? (
+                  ) : getUnifiedTimeline().length === 0 ? (
                     <div className="text-center py-10 px-4 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200/80 flex flex-col items-center">
                       <ShieldAlert className="h-8 w-8 text-gray-300" />
                       <p className="text-xs font-bold text-gray-400 mt-2">
-                        Sin registros sanitarios registrados
+                        Sin registros de trazabilidad
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5 font-medium max-w-[220px] leading-relaxed">
-                        Este animal no ha recibido vacunas ni intervenciones farmacológicas clínicas.
+                        Este animal no tiene pesajes ni intervenciones farmacológicas registradas.
                       </p>
                     </div>
                   ) : (
-                    // Beautiful Vertical Timeline
-                    <div className="relative border-l-2 border-emerald-100 ml-3 pl-5 space-y-6 py-2">
-                      {timelineRecords.map((record) => {
-                        const appDate = record.application_date ? new Date(record.application_date + 'T00:00:00') : new Date();
-                        const formattedAppDate = appDate.toLocaleDateString('es-ES', {
+                    // Unified Vertical Timeline
+                    <div className="relative border-l-2 border-emerald-100 ml-3 pl-5 space-y-5 py-2">
+                      {getUnifiedTimeline().map((item, idx) => {
+                        const formattedDate = item.date.toLocaleDateString('es-ES', {
                           day: '2-digit',
                           month: '2-digit',
                           year: 'numeric'
                         });
 
+                        if (item.type === 'weight') {
+                          return (
+                            <div key={`w-${idx}`} className="relative group">
+                              {/* Circle Node - Blue for weight */}
+                              <span className="absolute -left-[27px] top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 border-2 border-white shadow-sm transition-transform group-hover:scale-125 duration-200"></span>
+                              
+                              <div className="bg-blue-50/30 hover:bg-blue-50/60 border border-blue-100/60 hover:border-blue-200/60 p-3.5 rounded-xl shadow-xs transition-all duration-300">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[9px] font-black text-blue-700 bg-blue-50 border border-blue-100/50 px-2 py-0.5 rounded-md">
+                                    {formattedDate}
+                                  </span>
+                                  {item.isFirst ? (
+                                    <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
+                                      Peso inicial
+                                    </span>
+                                  ) : item.diff !== null && (
+                                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-0.5 ${
+                                      item.diff >= 0 
+                                        ? 'text-emerald-700 bg-emerald-50 border border-emerald-100/50' 
+                                        : 'text-rose-700 bg-rose-50 border border-rose-100/50'
+                                    }`}>
+                                      {item.diff >= 0 ? (
+                                        <FiTrendingUp className="h-3 w-3" />
+                                      ) : (
+                                        <FiTrendingDown className="h-3 w-3" />
+                                      )}
+                                      {item.diff >= 0 ? '+' : ''}{item.diff.toFixed(1)} kg
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Scale className="h-4 w-4 text-blue-500" />
+                                  <h5 className="text-xs font-black text-gray-800 leading-tight">
+                                    Pesaje: <span className="text-blue-700">{item.weight} kg</span>
+                                  </h5>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // Sanitary record
+                        const formattedRelease = item.releaseDate
+                          ? new Date(item.releaseDate + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                          : null;
+
                         return (
-                          <div key={record.id} className="relative group">
-                            {/* Circle Node Indicator */}
+                          <div key={`s-${idx}`} className="relative group">
+                            {/* Circle Node - Emerald for sanitary */}
                             <span className="absolute -left-[27px] top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 border-2 border-white shadow-sm transition-transform group-hover:scale-125 duration-200"></span>
                             
                             <div className="bg-gray-50/60 hover:bg-emerald-50/10 border border-gray-100 hover:border-emerald-100/60 p-3.5 rounded-xl shadow-xs transition-all duration-300">
                               <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-100/50 px-2 py-0.5 rounded-md inline-block mb-2">
-                                {formattedAppDate}
+                                {formattedDate}
                               </span>
-                              <h5 className="text-xs font-black text-gray-800 leading-tight">
-                                Vacunación: {record.medicine?.name || 'Fármaco Registrado'}
-                              </h5>
-                              {record.medicine?.description && (
+                              <div className="flex items-center gap-2">
+                                <HeartPulse className="h-4 w-4 text-emerald-500" />
+                                <h5 className="text-xs font-black text-gray-800 leading-tight">
+                                  Vacunación: {item.medicine}
+                                </h5>
+                              </div>
+                              {item.medicineDesc && (
                                 <p className="text-[11px] text-gray-500 mt-1 font-medium leading-relaxed">
-                                  {record.medicine.description}
+                                  {item.medicineDesc}
                                 </p>
                               )}
                               <div className="mt-2.5 pt-2 border-t border-gray-200/40 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                                 <span className="flex items-center gap-1 font-extrabold text-gray-500">
-                                  Dosis: <strong className="text-gray-700 font-black">{record.dose}</strong>
+                                  Dosis: <strong className="text-gray-700 font-black">{item.dose}</strong>
                                 </span>
-                                {record.medicine?.withdrawal_days > 0 && (
+                                {item.withdrawalDays > 0 && (
                                   <span className="flex items-center gap-1 text-amber-600">
-                                    Carencia: <strong className="text-amber-700 font-black">{record.medicine.withdrawal_days} días</strong>
+                                    Carencia: <strong className="text-amber-700 font-black">{item.withdrawalDays} días</strong>
+                                  </span>
+                                )}
+                                {formattedRelease && (
+                                  <span className="flex items-center gap-1 text-rose-600">
+                                    Fin: <strong className="text-rose-700 font-black">{formattedRelease}</strong>
                                   </span>
                                 )}
                               </div>
