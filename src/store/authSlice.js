@@ -8,6 +8,7 @@ export const loginUser = createAsyncThunk(
       const response = await api.post('/auth/login', credentials);
       const { user, token } = response.data.data;
       localStorage.setItem('token', token);
+      // Persistimos el objeto user completo (incluye permissions del RBAC)
       localStorage.setItem('user', JSON.stringify(user));
       return { user, token };
     } catch (error) {
@@ -28,9 +29,26 @@ export const registerUser = createAsyncThunk(
   }
 );
 
+// Migración de sesión: si el user guardado no tiene el campo 'permissions'
+// (sesión pre-RBAC), limpiamos localStorage para forzar un nuevo login.
+const storedUser = (() => {
+  try {
+    const u = JSON.parse(localStorage.getItem('user'));
+    if (u && !Array.isArray(u.permissions)) {
+      // Sesión vieja sin permisos → limpiar para forzar re-login
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      return null;
+    }
+    return u;
+  } catch {
+    return null;
+  }
+})();
+
 const initialState = {
-  user: JSON.parse(localStorage.getItem('user')) || null,
-  token: localStorage.getItem('token') || null,
+  user: storedUser,
+  token: storedUser ? localStorage.getItem('token') : null,
   loading: false,
   error: null,
 };
