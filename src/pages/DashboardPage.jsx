@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchAnimals, deleteAnimal, updateAnimal } from '../store/animalSlice';
 import { fetchDashboardAlerts } from '../store/alertSlice';
@@ -6,9 +6,29 @@ import { AnimalCard } from '../components/AnimalCard';
 import { AnimalTable } from '../components/AnimalTable';
 import { AlertCard } from '../components/AlertCard';
 import { FiCheckCircle, FiRefreshCw, FiDownload, FiX } from 'react-icons/fi';
-import { ShieldCheck, Stethoscope, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Stethoscope, AlertCircle, PieChart as PieChartIcon } from 'lucide-react';
 import { useCountUp } from '../hooks/useCountUp';
 import api from '../services/api';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
+
+// â”€â”€â”€ Paleta verde/emerald armÃ³nica para el grÃ¡fico â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const PIE_COLORS = [
+  '#10B981', // emerald-500
+  '#059669', // emerald-600
+  '#047857', // emerald-700
+  '#34D399', // emerald-400
+  '#6EE7B7', // emerald-300
+  '#A7F3D0', // emerald-200
+  '#065F46', // emerald-800
+  '#D1FAE5', // emerald-100
+];
 
 const CowIcon = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -46,6 +66,117 @@ const StatWidget = ({ title, value, icon, color, bgColor }) => {
           <p className="mt-1 text-4xl font-black text-gray-800 tracking-tight">{animatedValue}</p>
         </div>
       </div>
+    </div>
+  );
+};
+
+// â”€â”€â”€ Tooltip personalizado del Pie Chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const CustomPieTooltip = ({ active, payload, total }) => {
+  if (active && payload && payload.length) {
+    const { nombre, cantidad } = payload[0].payload;
+    const pct = total > 0 ? ((cantidad / total) * 100).toFixed(1) : 0;
+    return (
+      <div className="bg-white/90 backdrop-blur-sm border border-emerald-100 shadow-xl rounded-xl px-4 py-3 text-sm">
+        <p className="font-bold text-emerald-800">{nombre}</p>
+        <p className="text-gray-600 mt-0.5">
+          <span className="font-semibold text-gray-800">{cantidad}</span> animales
+        </p>
+        <p className="text-emerald-600 font-semibold">{pct}% del total</p>
+      </div>
+    );
+  }
+  return null;
+};
+
+// â”€â”€â”€ Leyenda personalizada â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const CustomLegend = ({ payload, total }) => (
+  <ul className="flex flex-col gap-1.5 mt-2 pl-2">
+    {payload.map((entry, i) => {
+      const pct = total > 0 ? ((entry.payload.cantidad / total) * 100).toFixed(1) : 0;
+      return (
+        <li key={i} className="flex items-center gap-2 text-xs">
+          <span
+            className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="text-gray-700 font-medium truncate max-w-[110px]" title={entry.value}>
+            {entry.value}
+          </span>
+          <span className="ml-auto text-gray-500 font-semibold">{pct}%</span>
+        </li>
+      );
+    })}
+  </ul>
+);
+
+// â”€â”€â”€ Tarjeta Pie Chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const CategoryPieChart = ({ categorias, loading }) => {
+  const total = categorias.reduce((sum, c) => sum + c.cantidad, 0);
+
+  return (
+    <div className="glass-card p-5 flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4">
+        <span className="p-2 bg-emerald-100/80 rounded-lg text-emerald-600 shadow-inner">
+          <PieChartIcon size={20} />
+        </span>
+        <div>
+          <h2 className="text-base font-bold text-gray-900 leading-tight">Distribución por Categorías</h2>
+          <p className="text-xs text-gray-500 font-medium">
+            {total > 0 ? `${total} animales en total` : 'Sin datos'}
+          </p>
+        </div>
+      </div>
+
+      {/* Body */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center min-h-[220px]">
+          <FiRefreshCw className="animate-spin h-8 w-8 text-emerald-400" />
+        </div>
+      ) : categorias.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[220px] gap-3">
+          <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center shadow-inner">
+            <PieChartIcon className="h-8 w-8 text-emerald-300" />
+          </div>
+          <p className="text-gray-500 font-semibold text-sm text-center">
+            No hay animales registrados
+          </p>
+          <p className="text-gray-400 text-xs text-center max-w-[180px]">
+            Registrá animales para ver la distribución por categoría aquí.
+          </p>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col mt-4 pt-4">
+          <ResponsiveContainer width="100%" height={220} style={{ border: 'none', outline: 'none' }}>
+            <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }} style={{ border: 'none', outline: 'none' }}>
+              <Pie
+                data={categorias}
+                dataKey="cantidad"
+                nameKey="nombre"
+                cx="50%"
+                cy="52%"
+                innerRadius={50}
+                outerRadius={85}
+                paddingAngle={3}
+                stroke="none"
+              >
+                {categorias.map((_, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={PIE_COLORS[index % PIE_COLORS.length]}
+                    className="transition-opacity hover:opacity-80 cursor-pointer"
+                  />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomPieTooltip total={total} />} />
+              <Legend
+                content={<CustomLegend total={total} />}
+                verticalAlign="bottom"
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 };
@@ -108,14 +239,14 @@ const DashboardEditModal = ({ isOpen, onClose, onSuccess, initialData }) => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Categoría / Especie</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CategorÃ­a / Especie</label>
               <select
                 required
                 className="w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-500 focus:border-brand-500 py-2 border px-3 bg-white"
                 value={formData.category}
                 onChange={e => setFormData({...formData, category: e.target.value})}
               >
-                <option value="" disabled>-- Seleccionar categoría --</option>
+                <option value="" disabled>-- Seleccionar categorÃ­a --</option>
                 <option value="Novillo">Novillo</option>
                 <option value="Vaca">Vaca</option>
                 <option value="Ternero">Ternero</option>
@@ -155,10 +286,28 @@ const DashboardPage = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedAnimal, setSelectedAnimal] = useState(null);
 
+  // â”€â”€ Pie Chart state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const [categorias, setCategorias] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const fetchCategoryStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const res = await api.get('/dashboard/stats');
+      setCategorias(res.data?.data?.categorias ?? []);
+    } catch (err) {
+      console.error('[Dashboard] Error fetching category stats:', err);
+      setCategorias([]);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     dispatch(fetchAnimals());
     dispatch(fetchDashboardAlerts());
-  }, [dispatch]);
+    fetchCategoryStats();
+  }, [dispatch, fetchCategoryStats]);
 
   const isLoading = animalsLoading || alertsLoading;
 
@@ -168,9 +317,10 @@ const DashboardPage = () => {
   };
 
   const handleDelete = async (animal) => {
-    if (window.confirm(`¿Estás seguro que deseas eliminar la caravana ${animal.tag_id}?`)) {
+    if (window.confirm(`Â¿EstÃ¡s seguro que deseas eliminar la caravana ${animal.tag_id}?`)) {
       try {
         await dispatch(deleteAnimal(animal.id)).unwrap();
+        fetchCategoryStats(); // Refresh pie chart after delete
       } catch (err) {
         alert(err);
       }
@@ -179,6 +329,7 @@ const DashboardPage = () => {
 
   const handleEditSuccess = () => {
     dispatch(fetchAnimals());
+    fetchCategoryStats(); // Refresh pie chart after edit
   };
 
   const handleExportSales = () => {
@@ -217,6 +368,7 @@ const DashboardPage = () => {
             onClick={() => {
               dispatch(fetchAnimals());
               dispatch(fetchDashboardAlerts());
+              fetchCategoryStats();
             }}
             disabled={isLoading}
             className="inline-flex items-center justify-center px-4 py-2.5 border border-brand-200 shadow-sm text-sm font-bold rounded-xl text-brand-700 bg-brand-50 hover:bg-brand-100 focus:outline-none transition-colors"
@@ -273,6 +425,7 @@ const DashboardPage = () => {
         )}
       </div>
 
+      {/* Main content grid: Table + Sidebar (Alerts + Pie Chart) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Main Content Area - Animals List */}
@@ -309,8 +462,9 @@ const DashboardPage = () => {
           </div>
         </div>
 
-        {/* Sidebar - Alerts */}
+        {/* Sidebar - Alerts + Pie Chart */}
         <div className="space-y-4 lg:pl-4">
+          {/* Alerts */}
           <div className="flex items-center justify-between glass-card p-4">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
               <span className="p-2 bg-red-100/80 rounded-lg text-red-600 shadow-inner"><AlertCircle size={20} /></span>
@@ -340,6 +494,9 @@ const DashboardPage = () => {
               </div>
             )}
           </div>
+
+          {/* â”€â”€ Pie Chart Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          <CategoryPieChart categorias={categorias} loading={statsLoading} />
         </div>
 
       </div>
